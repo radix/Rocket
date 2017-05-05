@@ -246,7 +246,7 @@ impl RocketConfig {
         let active_env = config.environment;
 
         // None of these unwraps should fail since the filename is coming from
-        // an existing connfig.
+        // an existing config.
         let mut configs = HashMap::new();
         configs.insert(Development, Config::default(Development, &f).unwrap());
         configs.insert(Staging, Config::default(Staging, &f).unwrap());
@@ -262,9 +262,15 @@ impl RocketConfig {
     /// Read the configuration from the `Rocket.toml` file. The file is search
     /// for recursively up the tree, starting from the CWD.
     pub fn read() -> Result<RocketConfig> {
-        // Find the config file, starting from the `cwd` and working backwords.
-        let file = RocketConfig::find()?;
-
+        // If the ROCKET_CONFIG_FILENAME environment variable is defined, we
+        // use it instead of searching for Rocket.toml.
+        let file = match ::std::env::var("ROCKET_CONFIG_FILE") {
+            Ok(filename) => PathBuf::from(filename),
+            Err(_) => {
+                // Find the config file, starting from the `cwd` and working backwords.
+                RocketConfig::find()?
+            }
+        };
         // Try to open the config file for reading.
         let mut handle = File::open(&file).map_err(|_| ConfigError::IOError)?;
 
