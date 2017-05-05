@@ -220,6 +220,7 @@ const CONFIG_FILENAME: &'static str = "Rocket.toml";
 const GLOBAL_ENV_NAME: &'static str = "global";
 const ENV_VAR_PREFIX: &'static str = "ROCKET_";
 const PREHANDLED_VARS: [&'static str; 2] = ["ROCKET_CODEGEN_DEBUG", CONFIG_ENV];
+const ROCKET_CONFIG_FILE_VAR: &'static str = "ROCKET_CONFIG_FILE";
 
 /// Wraps `std::result` with the error type of
 /// [ConfigError](enum.ConfigError.html).
@@ -262,9 +263,9 @@ impl RocketConfig {
     /// Read the configuration from the `Rocket.toml` file. The file is search
     /// for recursively up the tree, starting from the CWD.
     pub fn read() -> Result<RocketConfig> {
-        // If the ROCKET_CONFIG_FILENAME environment variable is defined, we
+        // If the ROCKET_CONFIG_FILE environment variable is defined, we
         // use it instead of searching for Rocket.toml.
-        let file = match ::std::env::var("ROCKET_CONFIG_FILE") {
+        let file = match ::std::env::var(ROCKET_CONFIG_FILE_VAR) {
             Ok(filename) => PathBuf::from(filename),
             Err(_) => {
                 // Find the config file, starting from the `cwd` and working backwords.
