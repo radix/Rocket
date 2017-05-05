@@ -115,6 +115,7 @@ extern crate base64;
 extern crate smallvec;
 
 #[cfg(test)] #[macro_use] extern crate lazy_static;
+#[cfg(test)] extern crate tempdir;
 
 #[doc(hidden)] #[macro_use] pub mod logger;
 pub mod testing;

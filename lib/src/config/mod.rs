@@ -537,15 +537,19 @@ pub fn active() -> Option<&'static Config> {
 #[cfg(test)]
 mod test {
     use std::env;
-    use std::sync::Mutex;
+    use std::fs::File;
+    use std::io::Write;
+    use std::sync::{Mutex, MutexGuard};
 
     use super::{RocketConfig, Config, ConfigError, ConfigBuilder};
-    use super::{Environment, GLOBAL_ENV_NAME};
+    use super::{Environment, GLOBAL_ENV_NAME, ROCKET_CONFIG_FILE_VAR};
     use super::environment::CONFIG_ENV;
     use super::Environment::*;
     use super::Result;
 
     use ::logger::LoggingLevel;
+
+    use tempdir::TempDir;
 
     const TEST_CONFIG_FILENAME: &'static str = "/tmp/testing/Rocket.toml";
 
@@ -580,13 +584,19 @@ mod test {
         ConfigBuilder::new(env)
     }
 
+    fn isolate_env<'a>() -> MutexGuard<'a, usize> {
+        // Take the lock so changing the environment doesn't cause races.
+        let lock = ENV_LOCK.lock().unwrap();
+        env::remove_var(CONFIG_ENV);
+        env::remove_var(ROCKET_CONFIG_FILE_VAR);
+        lock
+    }
+
     #[test]
     fn test_defaults() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
 
         // First, without an environment. Should get development defaults.
-        env::remove_var(CONFIG_ENV);
         check_config!(active_default(), default_config(Development));
 
         // Now with an explicit dev environment.
@@ -610,8 +620,7 @@ mod test {
 
     #[test]
     fn test_bad_environment_vars() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
 
         for env in &["", "p", "pr", "pro", "prodo", " prod", "dev ", "!dev!", "🚀 "] {
             env::set_var(CONFIG_ENV, env);
@@ -632,9 +641,7 @@ mod test {
 
     #[test]
     fn test_good_full_config_files() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
-        env::remove_var(CONFIG_ENV);
+        let _env_lock = isolate_env();
 
         let config_str = r#"
             address = "1.2.3.4"
@@ -679,10 +686,49 @@ mod test {
         check_config!(Staging, parsed, default_config(Staging));
     }
 
+    /// ROCKET_CONFIG_FILE can be specified to override the location of the file.
+    #[test]
+    fn test_good_config_file_environment_variable() {
+        let _env_lock = isolate_env();
+
+        let tmpdir = TempDir::new("rocket-test").expect("Couldn't create temporary directory!");
+        let config_path = tmpdir.path().join("notRocket.toml");
+
+        let config_str = r#"
+            [development]
+            address = "1.2.3.4"
+            port = 7810
+            workers = 21
+            log = "critical"
+            session_key = "8Xui8SN4mI+7egV/9dlfYYLGQJeEx4+DwmSQLwDVXJg="
+            template_dir = "mine"
+            json = true
+            pi = 3.14
+        "#;
+
+        let mut expected = default_config(Development)
+            .address("1.2.3.4")
+            .port(7810)
+            .workers(21)
+            .log_level(LoggingLevel::Critical)
+            .session_key("8Xui8SN4mI+7egV/9dlfYYLGQJeEx4+DwmSQLwDVXJg=")
+            .extra("template_dir", "mine")
+            .extra("json", true)
+            .extra("pi", 3.14)
+            .extra("config_file", config_path.to_str().expect("Couldn't convert a path to &str"));
+
+        let mut config_file = File::create(&config_path).expect("Couldn't create temporary directory");
+        config_file.write_all(config_str.as_bytes()).expect("Couldn't write config data to temporary file");
+
+        env::set_var(ROCKET_CONFIG_FILE_VAR, config_path);
+
+        let config = RocketConfig::read().expect("Couldn't read test config file");
+        assert_eq!(config.config[&Environment::Development], expected.unwrap());
+    }
+
     #[test]
     fn test_good_address_values() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
         env::set_var(CONFIG_ENV, "dev");
 
         check_config!(RocketConfig::parse(r#"
@@ -723,9 +769,7 @@ mod test {
 
     #[test]
     fn test_bad_address_values() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
-        env::remove_var(CONFIG_ENV);
+        let _env_lock = isolate_env();
 
         assert!(RocketConfig::parse(r#"
             [development]
@@ -752,8 +796,7 @@ mod test {
     // we're supplying don't actually exist.
     #[test]
     fn test_good_tls_values() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
         env::set_var(CONFIG_ENV, "dev");
 
         assert!(RocketConfig::parse(r#"
@@ -781,9 +824,7 @@ mod test {
 
     #[test]
     fn test_bad_tls_config() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
-        env::remove_var(CONFIG_ENV);
+        let _env_lock = isolate_env();
 
         assert!(RocketConfig::parse(r#"
             [development]
@@ -808,8 +849,7 @@ mod test {
 
     #[test]
     fn test_good_port_values() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
         env::set_var(CONFIG_ENV, "stage");
 
         check_config!(RocketConfig::parse(r#"
@@ -836,9 +876,7 @@ mod test {
 
     #[test]
     fn test_bad_port_values() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
-        env::remove_var(CONFIG_ENV);
+        let _env_lock = isolate_env();
 
         assert!(RocketConfig::parse(r#"
             [development]
@@ -868,8 +906,7 @@ mod test {
 
     #[test]
     fn test_good_workers_values() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
         env::set_var(CONFIG_ENV, "stage");
 
         check_config!(RocketConfig::parse(r#"
@@ -896,9 +933,7 @@ mod test {
 
     #[test]
     fn test_bad_workers_values() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
-        env::remove_var(CONFIG_ENV);
+        let _env_lock = isolate_env();
 
         assert!(RocketConfig::parse(r#"
             [development]
@@ -928,8 +963,7 @@ mod test {
 
     #[test]
     fn test_good_log_levels() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
         env::set_var(CONFIG_ENV, "stage");
 
         check_config!(RocketConfig::parse(r#"
@@ -957,9 +991,7 @@ mod test {
 
     #[test]
     fn test_bad_log_level_values() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
-        env::remove_var(CONFIG_ENV);
+        let _env_lock = isolate_env();
 
         assert!(RocketConfig::parse(r#"
             [dev]
@@ -979,8 +1011,7 @@ mod test {
 
     #[test]
     fn test_good_session_key() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
         env::set_var(CONFIG_ENV, "stage");
 
         check_config!(RocketConfig::parse(r#"
@@ -1004,9 +1035,7 @@ mod test {
 
     #[test]
     fn test_bad_session_key() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
-        env::remove_var(CONFIG_ENV);
+        let _env_lock = isolate_env();
 
         assert!(RocketConfig::parse(r#"
             [dev]
@@ -1026,9 +1055,7 @@ mod test {
 
     #[test]
     fn test_bad_toml() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
-        env::remove_var(CONFIG_ENV);
+        let _env_lock = isolate_env();
 
         assert!(RocketConfig::parse(r#"
             [dev
@@ -1047,8 +1074,7 @@ mod test {
 
     #[test]
     fn test_global_overrides() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
 
         // Test first that we can override each environment.
         for env in &Environment::all() {
@@ -1079,8 +1105,7 @@ mod test {
 
     #[test]
     fn test_env_override() {
-        // Take the lock so changing the environment doesn't cause races.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = isolate_env();
 
         let pairs = [
             ("log", "critical"), ("LOG", "debug"), ("PORT", "8110"),
